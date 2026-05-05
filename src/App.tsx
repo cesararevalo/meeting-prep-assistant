@@ -120,14 +120,28 @@ export default function App() {
         contents: parts,
         config: { 
           responseMimeType: 'application/json',
-          systemInstruction: `You are an expert meeting analyst. Extract structured intelligence from the inputs provided.
-          You MUST return valid JSON only in the following format:
+          systemInstruction: `You are an expert meeting analyst specializing in strategic organizational intelligence.
+          Your goal is to extract structured, actionable insights from meeting notes, transcripts, or documents.
+          
+          GROUNDING & REASONING CONSTRAINTS:
+          - Use ONLY the information provided in the input. DO NOT hallucinate facts, names, or dates.
+          - If a detail (like an assignee or due date) isn't explicit, infer it ONLY if high confidence exists in the context; otherwise, use "Unassigned" or "TBD".
+          - Distinguish between "decisions made" and "topics discussed".
+          
+          SECTION GUIDELINES:
+          1. Title: Create a professional, punchy title that captures the project or meeting essence.
+          2. Summary: Write a 3-4 sentence high-level narrative. Focus on the 'Why' and the 'Outcome'.
+          3. Talking Points: Each point must have a clear title and a description that adds value (not just a restatement of the title). Point out nuances or underlying themes.
+          4. Risks: Identify genuine project risks. Don't be generic—link them to the specific discussion (e.g., "Stakeholder misalignment on X" instead of "Communication risk").
+          5. Next Steps: Ensure tasks are discrete and actionable. Use the format "MMM DD, YYYY" for dates.
+          
+          You MUST return valid JSON ONLY in the following format:
           {
             "title": "A concise title or Project Name",
-            "summary": "Executive summary (3-4 sentences)",
-            "talkingPoints": [{"title": "Point Title", "description": "1-2 sentence detail"}],
-            "risks": [{"category": "e.g. CRITICAL DELAY", "title": "Specific Risk Name", "icon": "delay|compliance|market|deployment|general"}],
-            "nextSteps": [{"task": "Actionable task", "assignee": "Name", "dueDate": "MMM DD, YYYY"}]
+            "summary": "Executive summary reflecting core outcomes and context.",
+            "talkingPoints": [{"title": "Point Title", "description": "1-2 sentence detail with specific context"}],
+            "risks": [{"category": "Label for risk type", "title": "Specific Risk Name referencing project constraints", "icon": "delay|compliance|market|deployment|general"}],
+            "nextSteps": [{"task": "Actionable task starting with a verb", "assignee": "Name or Role", "dueDate": "MMM DD, YYYY"}]
           }`
         }
       });
@@ -137,6 +151,9 @@ export default function App() {
       
       // Robust JSON extraction
       let jsonStr = responseText.trim();
+      // Remove potential markdown code blocks
+      jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      
       const firstBrace = jsonStr.indexOf('{');
       const lastBrace = jsonStr.lastIndexOf('}');
       if (firstBrace !== -1 && lastBrace !== -1) {
@@ -146,6 +163,9 @@ export default function App() {
       try {
         const data = JSON.parse(jsonStr);
         setIntelligence(data);
+        // Immediate state update to ensure redirection
+        setIsProcessing(false);
+        setActiveTab('output');
       } catch (parseErr) {
         console.error("JSON Parse Error:", parseErr, "Raw Content:", responseText);
         throw new Error("The AI returned unconventional results. Please try refining your notes.");
@@ -153,9 +173,8 @@ export default function App() {
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Processing failed. Please check your inputs.');
-      setActiveTab('input');
-    } finally {
       setIsProcessing(false);
+      setActiveTab('input');
     }
   };
 
@@ -198,13 +217,24 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               className="flex-1 flex flex-col overflow-y-auto px-6 pb-24"
             >
-              <div className="pt-6 md:pt-8 flex-1 flex flex-col">
-                <h1 className="font-display font-bold text-3xl md:text-[52px] leading-[1.05] text-[#0F172A] tracking-tight mb-8 md:mb-12">
+              <div className="pt-4 md:pt-8 flex-1 flex flex-col">
+                <h1 className="font-display font-bold text-[28px] md:text-[52px] leading-[1.1] text-[#0F172A] tracking-tight mb-6 md:mb-12">
                   What's the context for your meeting?
                 </h1>
 
+                {error && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mb-6 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-center space-x-3 text-rose-600"
+                  >
+                    <AlertTriangle className="shrink-0 w-5 h-5" />
+                    <p className="text-sm font-medium">{error}</p>
+                  </motion.div>
+                )}
+
                 <div className="flex-1 flex flex-col space-y-4">
-                  <div className="flex-1 flex flex-col bg-white rounded-[32px] border border-[#E2E8F0] shadow-sm p-4 md:p-6 min-h-[400px] relative group overflow-hidden focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
+                  <div className="flex-1 flex flex-col bg-white rounded-[24px] md:rounded-[32px] border border-[#E2E8F0] shadow-sm p-4 md:p-6 min-h-[300px] md:min-h-[400px] relative group overflow-hidden focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
                     <textarea
                       value={inputText}
                       onChange={(e) => setInputText(e.target.value)}
@@ -214,8 +244,8 @@ export default function App() {
                           setFiles(prev => [...prev, ...pastedFiles.filter(f => f.size <= MAX_FILE_SIZE)]);
                         }
                       }}
-                      placeholder="Paste transcripts, raw bullets, screenshots, or agenda items here..."
-                      className="flex-1 w-full bg-transparent focus:outline-none text-lg md:text-xl text-[#0F172A] leading-relaxed placeholder:text-[#CBD5E1] resize-none"
+                      placeholder="Paste transcripts, bullets, or screenshots..."
+                      className="flex-1 w-full bg-transparent focus:outline-none text-base md:text-xl text-[#0F172A] leading-relaxed placeholder:text-[#CBD5E1] resize-none"
                     />
                     
                     {/* Attachment chips inside the input area */}
@@ -313,14 +343,14 @@ export default function App() {
               animate={{ opacity: 1 }}
               className="flex-1 flex flex-col overflow-y-auto px-4 md:px-6 pb-24"
             >
-              <div className="pt-6 md:pt-8 space-y-8 md:space-y-12">
-                <h1 className="font-display font-bold text-3xl md:text-[42px] leading-tight text-[#0F172A] tracking-tight">
+              <div className="pt-4 md:pt-8 space-y-6 md:space-y-12">
+                <h1 className="font-display font-bold text-[28px] md:text-[42px] leading-tight text-[#0F172A] tracking-tight">
                   {intelligence.title}
                 </h1>
 
                 {/* Summary */}
-                <div className="bg-[#F1F5F9] rounded-[20px] md:rounded-[24px] p-6 md:p-8 border-l-[6px] md:border-l-8 border-[#0F172A]">
-                  <p className="text-lg md:text-xl text-[#334155] italic leading-relaxed font-medium">
+                <div className="bg-[#F1F5F9] rounded-[16px] md:rounded-[24px] p-5 md:p-8 border-l-[4px] md:border-l-8 border-[#0F172A]">
+                  <p className="text-base md:text-xl text-[#334155] italic leading-relaxed font-medium">
                     "{intelligence.summary}"
                   </p>
                 </div>
@@ -378,16 +408,16 @@ export default function App() {
                     </div>
                     <h2 className="font-display font-bold text-xl md:text-2xl text-[#0F172A]">Strategic Next Steps</h2>
                   </div>
-                  <div className="space-y-3 md:space-y-4">
+                  <div className="space-y-3">
                     {intelligence.nextSteps.map((step, i) => (
-                      <div key={i} className="bg-white rounded-[24px] md:rounded-[28px] p-6 md:p-7 shadow-sm border border-slate-50">
-                        <div className="flex items-start justify-between mb-4 md:mb-6 gap-3">
+                      <div key={i} className="bg-white rounded-[20px] md:rounded-[28px] p-5 md:p-7 shadow-sm border border-slate-50">
+                        <div className="flex items-start justify-between mb-3 md:mb-6 gap-2 md:gap-3">
                            <div className="flex-1">
-                              <h3 className="font-bold text-base md:text-lg text-[#0F172A] leading-snug">{step.task}</h3>
+                              <h3 className="font-bold text-sm md:text-lg text-[#0F172A] leading-snug">{step.task}</h3>
                            </div>
                            <div className="text-right shrink-0">
-                              <p className="text-[8px] font-black tracking-widest text-[#94A3B8] uppercase mb-0.5">DUE</p>
-                              <p className="text-[11px] md:text-[12px] font-bold text-[#475569] whitespace-nowrap">{step.dueDate}</p>
+                              <p className="text-[7px] md:text-[8px] font-black tracking-widest text-[#94A3B8] uppercase mb-0.5">DUE</p>
+                              <p className="text-[10px] md:text-[12px] font-bold text-[#475569]">{step.dueDate}</p>
                            </div>
                         </div>
                         <div className="flex items-center justify-between pt-4 md:pt-5 border-t border-slate-100/50">
