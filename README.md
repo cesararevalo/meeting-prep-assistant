@@ -1,3 +1,7 @@
+# Meeting Prep Assistant - Oxford AI Engineering Course Assignment 1
+
+An expert AI assistant designed to process meeting inputs and output structured, actionable intelligence.
+
 # Run Locally
 
 **Prerequisites:**  Node.js
