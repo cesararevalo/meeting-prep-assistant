@@ -1,38 +1,88 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI, GenerateContentResponse, Part } from '@google/genai';
-import { UploadCloud, FileText, Image as ImageIcon, X, Play, Loader2, Sparkles, BrainCircuit, Mic } from 'lucide-react';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { GoogleGenAI, Part } from '@google/genai';
+import { 
+  UploadCloud, 
+  FileText, 
+  X, 
+  Loader2, 
+  Sparkles, 
+  BrainCircuit, 
+  Menu, 
+  ClipboardCopy,
+  Settings,
+  AlertTriangle,
+  CheckCircle2,
+  User,
+  ShieldAlert,
+  ArrowRight,
+  ChevronRight,
+  TrendingDown,
+  Timer
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB buffer
+interface Task {
+  task: string;
+  assignee: string;
+  dueDate: string;
+}
+
+interface Risk {
+  category: string;
+  title: string;
+  icon: 'delay' | 'compliance' | 'market' | 'deployment' | 'general';
+}
+
+interface TalkingPoint {
+  title: string;
+  description: string;
+}
+
+interface MeetingIntelligence {
+  title: string;
+  summary: string;
+  talkingPoints: TalkingPoint[];
+  risks: Risk[];
+  nextSteps: Task[];
+}
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState<'input' | 'output'>('input');
   const [inputText, setInputText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [result, setResult] = useState('');
+  const [processingStep, setProcessingStep] = useState(0); // 0: Ingesting, 1: Identifying, 2: Structuring
+  const [intelligence, setIntelligence] = useState<MeetingIntelligence | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Simulate progress steps during processing
+  useEffect(() => {
+    let interval: any;
+    if (isProcessing && !intelligence) {
+      interval = setInterval(() => {
+        setProcessingStep(prev => (prev < 2 ? prev + 1 : prev));
+      }, 2500);
+    } else {
+      setProcessingStep(0);
+    }
+    return () => clearInterval(interval);
+  }, [isProcessing, intelligence]);
 
   useEffect(() => {
-    if (result) {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (intelligence) {
+      scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  }, [result]);
+  }, [intelligence]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const selectedFiles = Array.from(e.target.files);
-      const validFiles = selectedFiles.filter(f => f.size <= MAX_FILE_SIZE);
-      if (validFiles.length < selectedFiles.length) {
-         setError('Some files were ignored because they exceed the 20MB limit.');
-      } else {
-         setError(null);
-      }
-      setFiles(prev => [...prev, ...validFiles]);
+      setFiles(prev => [...prev, ...selectedFiles.filter(f => f.size <= MAX_FILE_SIZE)]);
     }
   };
 
@@ -40,246 +90,368 @@ export default function App() {
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const getFileIcon = (type: string) => {
-    if (type.startsWith('image/')) return <ImageIcon className="w-4 h-4 text-blue-500" />;
-    if (type === 'application/pdf') return <FileText className="w-4 h-4 text-red-500" />;
-    return <FileText className="w-4 h-4 text-gray-500" />;
-  };
-
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        const base64 = result.split(',')[1];
-        resolve(base64);
-      };
+      reader.onload = () => resolve((reader.result as string).split(',')[1]);
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
   };
 
   const processMeeting = async () => {
-    if (!inputText.trim() && files.length === 0) {
-      setError('Please provide some text or files to process.');
-      return;
-    }
+    if (!inputText.trim() && files.length === 0) return;
 
     setIsProcessing(true);
-    setResult('');
+    setIntelligence(null);
     setError(null);
+    setActiveTab('output');
 
     try {
       const parts: Part[] = [];
-      
-      if (inputText.trim()) {
-        parts.push({ text: inputText });
-      }
-
+      if (inputText.trim()) parts.push({ text: inputText });
       for (const file of files) {
         const base64Data = await fileToBase64(file);
-        parts.push({
-          inlineData: {
-            data: base64Data,
-            mimeType: file.type
-          }
-        });
+        parts.push({ inlineData: { data: base64Data, mimeType: file.type } });
       }
 
-      const stream = await ai.models.generateContentStream({
-        model: 'gemini-3.1-pro-preview',
+      const response = await ai.models.generateContent({ 
+        model: 'gemini-3-flash-preview',
         contents: parts,
-        config: {
-          systemInstruction: `You are a highly analytical Meeting Prep Assistant. Your primary function is to ingest meeting materials and, using these inputs, generate structured meeting intelligence output.
-
-**Core Directives:**
-1. **Strict Grounding:** You must base all extractions strictly on the provided inputs, which can be any of the following: text notes, PDF documents, or presentation slides. Do not hallucinate facts, dates, or names. If information for a specific section is missing, state "No information provided in the input documents."
-2. **Reasoning Constraints:** Before generating the final output, briefly outline your reasoning process for identifying the highest priority risks to ensure they are genuinely derived from the text.
-3. **Structured Formatting:** You must format your final response to clearly separate the required output categories.
-
-**Required Output Components:**
-Your final output must explicitly include the following intelligence categories:
-* **Meeting Summary:** A concise executive summary (3-4 sentences) of the meeting's core purpose and major outcomes.
-* **Risk Identification:** A bulleted list of potential operational, financial, technical, or strategic risks mentioned or heavily implied in the inputs.
-* **Key Talking Points:** 3-5 crucial topics, arguments, or data points that need to be addressed or carried forward in subsequent discussions.
-* **Next Steps:** Clear, actionable tasks assigned to specific participants (if named) or general task forces, including deadlines if mentioned.`
+        config: { 
+          responseMimeType: 'application/json',
+          systemInstruction: `You are an expert meeting analyst. Extract structured intelligence from the inputs provided.
+          You MUST return valid JSON only in the following format:
+          {
+            "title": "A concise title or Project Name",
+            "summary": "Executive summary (3-4 sentences)",
+            "talkingPoints": [{"title": "Point Title", "description": "1-2 sentence detail"}],
+            "risks": [{"category": "e.g. CRITICAL DELAY", "title": "Specific Risk Name", "icon": "delay|compliance|market|deployment|general"}],
+            "nextSteps": [{"task": "Actionable task", "assignee": "Name", "dueDate": "MMM DD, YYYY"}]
+          }`
         }
       });
 
-      for await (const chunk of stream) {
-        const c = chunk as GenerateContentResponse;
-        if (c.text) {
-          setResult(prev => prev + c.text);
-        }
+      const responseText = response.text;
+      if (!responseText) throw new Error("Empty response from AI");
+      
+      // Robust JSON extraction
+      let jsonStr = responseText.trim();
+      const firstBrace = jsonStr.indexOf('{');
+      const lastBrace = jsonStr.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1) {
+        jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+      }
+      
+      try {
+        const data = JSON.parse(jsonStr);
+        setIntelligence(data);
+      } catch (parseErr) {
+        console.error("JSON Parse Error:", parseErr, "Raw Content:", responseText);
+        throw new Error("The AI returned unconventional results. Please try refining your notes.");
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'An error occurred while processing your request.');
+      setError(err.message || 'Processing failed. Please check your inputs.');
+      setActiveTab('input');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.dataTransfer.files) {
-      const droppedFiles = Array.from(e.dataTransfer.files);
-      const validFiles = droppedFiles.filter(f => f.size <= MAX_FILE_SIZE);
-      if (validFiles.length < droppedFiles.length) {
-         setError('Some files were ignored because they exceed the 20MB limit.');
-      } else {
-         setError(null);
-      }
-      setFiles(prev => [...prev, ...validFiles]);
+  const renderRiskIcon = (type: string) => {
+    switch (type) {
+      case 'delay': return <AlertTriangle className="w-5 h-5 text-indigo-600" />;
+      case 'compliance': return <ShieldAlert className="w-5 h-5 text-indigo-600" />;
+      case 'market': return <TrendingDown className="w-5 h-5 text-indigo-600" />;
+      case 'deployment': return <Timer className="w-5 h-5 text-indigo-600" />;
+      default: return <AlertTriangle className="w-5 h-5 text-indigo-600" />;
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col md:flex-row">
-      {/* Left Column - Inputs */}
-      <div className="w-full md:w-5/12 lg:w-1/3 bg-white border-r border-slate-200 flex flex-col h-auto md:h-screen sticky top-0 shadow-sm z-10">
-        <div className="p-6 border-b border-slate-100 flex items-center space-x-3 bg-white">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-200">
-            <BrainCircuit className="w-5 h-5" />
-          </div>
-          <div>
-            <h1 className="font-semibold text-lg text-slate-800 tracking-tight">Meeting Prep Assistant</h1>
-            <p className="text-xs text-slate-500 font-medium">AI Intelligence Extractor</p>
-          </div>
+    <div className="flex flex-col h-screen bg-[#F8FAFC] overflow-hidden font-sans selection:bg-indigo-100">
+      {/* Header */}
+      <header className="flex items-center justify-between px-6 py-4 md:py-5 bg-[#F8FAFC] z-20 shrink-0">
+        <div className="flex items-center space-x-4">
+          <Menu className="w-7 h-7 text-[#0F172A]" />
+          <span className="font-display font-bold text-xl md:text-2xl text-[#0F172A] tracking-tight">Meeting Slay</span>
         </div>
+        <div className="w-10 h-10 md:w-11 md:h-11 rounded-2xl overflow-hidden border-2 border-white shadow-sm ring-1 ring-slate-100">
+          <img 
+            src="https://images.unsplash.com/photo-1560250097-0b93528c311a?q=80&w=256&h=256&auto=format&fit=crop" 
+            alt="User avatar" 
+            className="w-full h-full object-cover"
+            referrerPolicy="no-referrer"
+          />
+        </div>
+      </header>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-slate-700 flex items-center">
-              Meeting Notes/Transcript
-            </label>
-            <textarea
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="Paste meeting transcript, rough notes, or agenda here..."
-              className="w-full h-40 p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all resize-none text-sm placeholder:text-slate-400"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-slate-700">
-              Supporting Materials
-            </label>
-            <p className="text-xs text-slate-500 mb-2">Upload PDFs, Slides (Images), or text files.</p>
-            
-            <div 
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-slate-200 rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-slate-50 hover:border-indigo-300 transition-colors group"
+      <main className="flex-1 overflow-hidden max-w-lg mx-auto w-full flex flex-col relative">
+        <AnimatePresence mode="wait">
+          {/* INPUT SCREEN */}
+          {activeTab === 'input' && (
+            <motion.div 
+              key="input"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="flex-1 flex flex-col overflow-y-auto px-6 pb-24"
             >
-              <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-500 mb-3 group-hover:scale-110 transition-transform">
-                <UploadCloud className="w-6 h-6" />
-              </div>
-              <p className="text-sm font-medium text-slate-700">Drag & drop files or click to browse</p>
-              <p className="text-xs text-slate-400 mt-1">PDF, JPG, PNG, TXT up to 20MB</p>
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileChange} 
-                className="hidden" 
-                multiple 
-                accept=".pdf,image/*,.txt"
-              />
-            </div>
+              <div className="pt-6 md:pt-8 pb-10">
+                <h1 className="font-display font-bold text-4xl md:text-[52px] leading-[1.05] text-[#0F172A] tracking-tight mb-8 md:mb-12">
+                  Feed me your<br />notes.
+                </h1>
 
-            {files.length > 0 && (
-              <div className="mt-4 space-y-2">
-                {files.map((file, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-100 shadow-sm animate-in fade-in zoom-in-95 duration-200">
-                    <div className="flex items-center space-x-3 overflow-hidden">
-                      {getFileIcon(file.type)}
-                      <span className="text-sm text-slate-700 truncate max-w-[200px] font-medium">{file.name}</span>
+                <div 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="group border-2 border-dashed border-[#E2E8F0] rounded-[32px] md:rounded-[36px] p-8 md:p-12 mb-8 md:mb-10 flex flex-col items-center justify-center text-center cursor-pointer bg-transparent hover:bg-white transition-all shadow-sm hover:shadow-md"
+                >
+                  <div className="w-16 h-20 md:w-20 md:h-24 bg-[#DBEAFE] rounded-[24px] flex items-center justify-center text-[#1E3A8A] mb-6 md:mb-8 relative">
+                    <UploadCloud className="w-8 h-8 md:w-10 md:h-10" />
+                    <div className="absolute top-3 right-3 md:top-4 md:right-4 w-5 h-5 md:w-6 md:h-6 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                      <ArrowRight className="w-3 h-3 rotate-[-45deg]" />
                     </div>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
-                      className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1 rounded transition-colors"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
                   </div>
-                ))}
+                  <h3 className="text-lg md:text-xl font-bold text-[#0F172A] leading-tight mb-2">
+                    Upload Meeting Notes, PDFs, or Slides
+                  </h3>
+                  <p className="text-[10px] md:text-[11px] font-bold text-[#94A3B8] tracking-[0.15em] uppercase">
+                    DRAG & DROP OR BROWSE FILES
+                  </p>
+                  <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" multiple accept=".pdf,image/*,.txt" />
+                </div>
+
+                <div className="space-y-3 md:space-y-4">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] md:text-[11px] font-bold uppercase tracking-[0.15em] text-[#94A3B8]">RAW NOTES INPUT</label>
+                    <ClipboardCopy className="w-4 h-4 md:w-5 md:h-5 text-[#94A3B8]" />
+                  </div>
+                  <div className="bg-white rounded-[24px] border border-[#E2E8F0] shadow-sm p-6 md:p-8 min-h-[250px] md:min-h-[300px]">
+                    <textarea
+                      value={inputText}
+                      onChange={(e) => setInputText(e.target.value)}
+                      placeholder="Paste transcripts, raw bullets, or agenda items here..."
+                      className="w-full bg-transparent focus:outline-none text-base md:text-lg text-[#0F172A] leading-relaxed placeholder:text-[#CBD5E1] resize-none"
+                    />
+                  </div>
+                </div>
+
+                {files.length > 0 && (
+                  <div className="mt-6 md:mt-8 space-y-2 md:space-y-3">
+                    {files.map((file, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-3 md:p-4 bg-white rounded-[16px] md:rounded-[20px] border border-slate-100 shadow-sm">
+                        <div className="flex items-center space-x-3">
+                          <div className="p-1.5 md:p-2 bg-slate-50 rounded-xl text-indigo-500"><FileText className="w-4 h-4 md:w-5 md:h-5" /></div>
+                          <span className="text-xs md:text-sm font-bold text-slate-700 truncate max-w-[150px] md:max-w-[180px]">{file.name}</span>
+                        </div>
+                        <X onClick={() => removeFile(idx)} className="w-4 h-4 md:w-5 md:h-5 text-slate-300 cursor-pointer" />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+            </motion.div>
+          )}
+
+          {/* INTERIM / PROCESSING SCREEN */}
+          {activeTab === 'output' && isProcessing && !intelligence && (
+            <motion.div 
+              key="processing"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex-1 flex flex-col items-center justify-center p-6 bg-[#F8FAFC] min-h-full"
+            >
+              <div className="w-full max-w-sm space-y-8 md:space-y-12">
+                {/* Animation Box */}
+                <div className="relative mx-auto w-48 h-48 md:w-64 md:h-64">
+                   <div className="absolute top-0 left-0 w-full h-full bg-[#94A3B8]/5 rounded-[32px] md:rounded-[48px] rotate-[-6deg]" />
+                   <div className="absolute top-0 left-0 w-full h-full bg-white rounded-[32px] md:rounded-[48px] shadow-2xl shadow-slate-200/50 border border-slate-100 flex items-center justify-center relative overflow-hidden">
+                      <motion.div 
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
+                        className="w-16 h-16 md:w-24 md:h-24 bg-[#7D94B1] rounded-[24px] md:rounded-[32px] flex items-center justify-center text-white relative z-10"
+                      >
+                         <Settings className="w-7 h-7 md:w-10 md:h-10" />
+                      </motion.div>
+                      <div className="absolute top-0 left-0 w-full h-1 bg-[#0F172A] rotate-[-45deg] origin-top-left scale-[2]" />
+                   </div>
+                </div>
+
+                <div className="text-center space-y-2 md:space-y-3">
+                  <h2 className="font-display font-bold text-2xl md:text-[36px] text-[#0F172A] leading-tight">Doing the hard work for you...</h2>
+                  <p className="text-[#64748B] text-base md:text-lg">Extracting brilliance from your chaos.</p>
+                </div>
+
+                <div className="space-y-4 md:space-y-6">
+                  {['Ingesting Notes', 'Identifying Risks', 'Structuring Outputs'].map((label, i) => (
+                    <div key={i} className={`p-4 md:p-6 rounded-[20px] md:rounded-[24px] border border-slate-100 transition-all ${processingStep >= i ? 'bg-white shadow-xl shadow-slate-200/40' : 'bg-transparent opacity-40'}`}>
+                      <div className="flex items-center justify-between mb-3 md:mb-4">
+                        <span className="font-bold text-sm md:text-base text-[#0F172A]">{label}</span>
+                        {processingStep > i ? (
+                          <div className="w-4 h-4 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center"><CheckCircle2 className="w-3 h-3" /></div>
+                        ) : processingStep === i ? (
+                          <Loader2 className="w-3 md:w-4 h-3 md:h-4 text-indigo-500 animate-spin" />
+                        ) : null}
+                      </div>
+                      <div className="h-1 md:h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: processingStep > i ? '100%' : processingStep === i ? '60%' : '0%' }}
+                          className="h-full bg-[#0F172A] rounded-full"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* RESULTS SCREEN */}
+          {activeTab === 'output' && intelligence && (
+            <motion.div 
+              key="results"
+              ref={scrollRef}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex-1 flex flex-col overflow-y-auto px-4 md:px-6 pb-24"
+            >
+              <div className="pt-6 md:pt-8 space-y-8 md:space-y-12">
+                <h1 className="font-display font-bold text-3xl md:text-[42px] leading-tight text-[#0F172A] tracking-tight">
+                  {intelligence.title}
+                </h1>
+
+                {/* Summary */}
+                <div className="bg-[#F1F5F9] rounded-[20px] md:rounded-[24px] p-6 md:p-8 border-l-[6px] md:border-l-8 border-[#0F172A]">
+                  <p className="text-lg md:text-xl text-[#334155] italic leading-relaxed font-medium">
+                    "{intelligence.summary}"
+                  </p>
+                </div>
+
+                {/* Talking Points */}
+                <section className="bg-white rounded-[28px] md:rounded-[32px] p-6 md:p-8 shadow-sm border border-slate-50 space-y-6 md:space-y-8">
+                  <div className="flex items-center space-x-3 mb-1">
+                    <div className="p-1.5 md:p-2 bg-slate-50 rounded-lg text-[#0F172A]">
+                      <FileText className="w-4 md:w-5 h-4 md:h-5" />
+                    </div>
+                    <h2 className="font-display font-bold text-xl md:text-2xl text-[#0F172A]">Key Talking Points</h2>
+                  </div>
+                  <div className="space-y-6 md:space-y-8">
+                    {intelligence.talkingPoints.map((point, i) => (
+                      <div key={i} className="flex space-x-3 md:space-x-4">
+                        <div className="shrink-0 mt-2 md:mt-2.5 w-1.5 h-1.5 bg-[#0F172A] rounded-full" />
+                        <div className="space-y-1.5">
+                          <h3 className="font-bold text-base md:text-lg text-[#0F172A] leading-snug">{point.title}</h3>
+                          <p className="text-slate-500 text-xs md:text-sm leading-relaxed">{point.description}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                {/* Risks */}
+                <section className="bg-[#F1F5F9]/60 rounded-[32px] md:rounded-[40px] p-6 md:p-8 border border-slate-100 flex flex-col space-y-5 md:space-y-6">
+                  <div className="flex items-center space-x-3 mb-1">
+                    <div className="p-1.5 md:p-2 bg-white rounded-xl shadow-sm text-rose-500">
+                      <AlertTriangle className="w-4 md:w-5 h-4 md:h-5" />
+                    </div>
+                    <h2 className="font-display font-bold text-xl md:text-2xl text-[#0F172A]">Risk Identification</h2>
+                  </div>
+                  <div className="space-y-3 md:space-y-4">
+                    {intelligence.risks.map((risk, i) => (
+                      <div key={i} className="bg-white rounded-[20px] md:rounded-[24px] p-5 md:p-6 shadow-sm border border-slate-50 flex items-center space-x-4 md:space-x-6 relative overflow-hidden group">
+                        <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-[#0F172A]" />
+                        <div className="shrink-0 w-12 h-12 md:w-14 md:h-14 bg-slate-50 rounded-xl md:rounded-2xl flex items-center justify-center">
+                          {renderRiskIcon(risk.icon)}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-[8px] md:text-[9px] font-black uppercase tracking-[0.2em] md:tracking-[0.25em] text-slate-400 mb-0.5 md:mb-1">{risk.category}</p>
+                          <h3 className="font-bold text-base md:text-[17px] text-[#0F172A] leading-tight">{risk.title}</h3>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                {/* Next Steps */}
+                <section className="bg-[#EDF2F7] rounded-[32px] md:rounded-[40px] p-6 md:p-8 border border-slate-100 flex flex-col space-y-5 md:space-y-6">
+                  <div className="flex items-center space-x-3 mb-1">
+                    <div className="p-1.5 md:p-2 bg-white rounded-xl shadow-sm text-emerald-500">
+                      <CheckCircle2 className="w-4 md:w-5 h-4 md:h-5" />
+                    </div>
+                    <h2 className="font-display font-bold text-xl md:text-2xl text-[#0F172A]">Strategic Next Steps</h2>
+                  </div>
+                  <div className="space-y-3 md:space-y-4">
+                    {intelligence.nextSteps.map((step, i) => (
+                      <div key={i} className="bg-white rounded-[24px] md:rounded-[28px] p-6 md:p-7 shadow-sm border border-slate-50">
+                        <div className="flex items-start justify-between mb-4 md:mb-6 gap-3">
+                           <div className="flex-1">
+                              <h3 className="font-bold text-base md:text-lg text-[#0F172A] leading-snug">{step.task}</h3>
+                           </div>
+                           <div className="text-right shrink-0">
+                              <p className="text-[8px] font-black tracking-widest text-[#94A3B8] uppercase mb-0.5">DUE</p>
+                              <p className="text-[11px] md:text-[12px] font-bold text-[#475569] whitespace-nowrap">{step.dueDate}</p>
+                           </div>
+                        </div>
+                        <div className="flex items-center justify-between pt-4 md:pt-5 border-t border-slate-100/50">
+                           <div className="flex items-center space-x-2 md:space-x-2.5">
+                              <div className="w-6 h-6 md:w-7 md:h-7 bg-[#F8FAFC] rounded-full flex items-center justify-center text-slate-400 ring-1 ring-slate-100">
+                                 <User className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                              </div>
+                              <span className="text-[10px] md:text-[11px] font-bold text-[#64748B] uppercase tracking-[0.1em]">ASSIGNEE: {step.assignee}</span>
+                           </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
+      {/* Navigation Bar */}
+      <nav className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto bg-white/80 backdrop-blur-xl border-t border-slate-100 px-8 pt-4 pb-8 md:pb-10 flex items-center justify-around z-30 shadow-[0_-8px_30px_rgb(0,0,0,0.04)]">
+        <button 
+          onClick={() => setActiveTab('input')}
+          className={`flex flex-col items-center transition-all ${activeTab === 'input' ? 'text-[#0F172A]' : 'text-[#94A3B8]'}`}
+        >
+          <div className={`p-2 md:p-2.5 rounded-2xl transition-all ${activeTab === 'input' ? 'bg-slate-100 scale-110' : 'bg-transparent'}`}>
+            <UploadCloud className="w-6 h-6 md:w-7 md:h-7" />
           </div>
-          
-          {error && (
-            <div className="p-4 bg-red-50 text-red-700 text-sm rounded-xl border border-red-100 flex items-start">
-              <span className="mr-2 text-red-500">⚠</span>
-              {error}
-            </div>
+          <span className="text-[9px] md:text-[10px] font-bold mt-1.5 md:mt-2 uppercase tracking-[0.15em]">Input</span>
+        </button>
+        
+        {/* Floating Action Button */}
+        <AnimatePresence>
+          {activeTab === 'input' && !isProcessing && (
+            <motion.button 
+              initial={{ scale: 0, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0, y: 20 }}
+              onClick={processMeeting}
+              disabled={!inputText.trim() && files.length === 0}
+              className="absolute -top-8 md:-top-10 left-1/2 -translate-x-1/2 w-16 h-16 md:w-20 md:h-20 bg-[#0F172A] rounded-[24px] md:rounded-[28px] flex items-center justify-center text-white shadow-2xl shadow-indigo-200/50 border-[5px] md:border-[6px] border-[#F8FAFC] active:scale-95 transition-all disabled:opacity-40 disabled:grayscale hover:bg-slate-800"
+            >
+              <Sparkles className="w-7 h-7 md:w-9 md:h-9" />
+            </motion.button>
           )}
-        </div>
+        </AnimatePresence>
 
-        <div className="p-6 border-t border-slate-100 bg-white">
-          <button
-            onClick={processMeeting}
-            disabled={isProcessing || (!inputText.trim() && files.length === 0)}
-            className="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed text-white rounded-xl font-semibold transition-all shadow-sm flex items-center justify-center space-x-2"
-          >
-            {isProcessing ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                <span>Extracting Intelligence...</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-5 h-5" />
-                <span>Process Meeting</span>
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Right Column - Results */}
-      <div className="w-full md:w-7/12 lg:w-2/3 flex flex-col h-[60vh] md:h-screen bg-[#F8FAFC]">
-        <div className="p-6 border-b border-slate-200 bg-white shadow-sm flex items-center justify-between z-10 hidden md:flex">
-          <h2 className="font-semibold text-slate-800">Intelligence Output</h2>
-          {result && (
-            <div className="text-xs font-medium px-3 py-1 bg-green-100 text-green-700 rounded-full flex items-center">
-              <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
-              Processing Complete
-            </div>
-          )}
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 md:p-10">
-          {!result && !isProcessing ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400 max-w-sm mx-auto text-center space-y-4">
-              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center text-slate-300">
-                <BrainCircuit className="w-8 h-8" />
-              </div>
-              <div>
-                <p className="text-lg font-medium text-slate-600 mb-1">Upload meeting materials</p>
-                <p className="text-sm text-slate-500">I will extract the meeting summary, identify key risks, highlight talking points, and list actionable next steps based on your constraints.</p>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-               {/* Result container */}
-               <div className="p-8 prose prose-slate max-w-none prose-headings:font-semibold prose-a:text-indigo-600 prose-li:marker:text-indigo-400">
-                 <Markdown remarkPlugins={[remarkGfm]}>
-                    {result || "Thinking..."}
-                 </Markdown>
-                 <div ref={chatEndRef} />
-               </div>
-            </div>
-          )}
-        </div>
-      </div>
+        <button 
+          onClick={() => setActiveTab('output')}
+          disabled={!intelligence && !isProcessing}
+          className={`flex flex-col items-center transition-all ${activeTab === 'output' ? 'text-[#0F172A]' : 'text-[#94A3B8] opacity-50'}`}
+        >
+          <div className={`p-2 md:p-2.5 rounded-2xl transition-all ${activeTab === 'output' ? 'bg-slate-100 scale-110' : 'bg-transparent'}`}>
+            <BrainCircuit className="w-6 h-6 md:w-7 md:h-7" />
+          </div>
+          <span className="text-[9px] md:text-[10px] font-bold mt-1.5 md:mt-2 uppercase tracking-[0.15em]">Results</span>
+        </button>
+      </nav>
     </div>
   );
 }
