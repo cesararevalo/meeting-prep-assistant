@@ -1,13 +1,11 @@
-# Run and deploy your AI Studio app
+# Meeting Prep Assistant - Oxford AI Engineering Course Assignment 1
 
-This contains everything you need to run your app locally.
+An expert AI assistant designed to process meeting inputs and output structured, actionable intelligence.
 
-View your app in AI Studio: https://ai.studio/apps/068d1e44-6d4a-45b3-b36c-3cfce5377e6f
 
-## Run Locally
+# Run Locally
 
 **Prerequisites:**  Node.js
-
 
 1. Install dependencies:
    `npm install`
