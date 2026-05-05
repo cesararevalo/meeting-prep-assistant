@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Part } from '@google/genai';
 import { 
-  UploadCloud, 
   FileText, 
   X, 
   Loader2, 
@@ -14,10 +13,11 @@ import {
   CheckCircle2,
   User,
   ShieldAlert,
-  ArrowRight,
   ChevronRight,
   TrendingDown,
-  Timer
+  Timer,
+  Plus,
+  Paperclip
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -198,58 +198,53 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               className="flex-1 flex flex-col overflow-y-auto px-6 pb-24"
             >
-              <div className="pt-6 md:pt-8 pb-10">
-                <h1 className="font-display font-bold text-4xl md:text-[52px] leading-[1.05] text-[#0F172A] tracking-tight mb-8 md:mb-12">
-                  Feed me your<br />notes.
+              <div className="pt-6 md:pt-8 flex-1 flex flex-col">
+                <h1 className="font-display font-bold text-3xl md:text-[52px] leading-[1.05] text-[#0F172A] tracking-tight mb-8 md:mb-12">
+                  What's the context for your meeting?
                 </h1>
 
-                <div 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="group border-2 border-dashed border-[#E2E8F0] rounded-[32px] md:rounded-[36px] p-8 md:p-12 mb-8 md:mb-10 flex flex-col items-center justify-center text-center cursor-pointer bg-transparent hover:bg-white transition-all shadow-sm hover:shadow-md"
-                >
-                  <div className="w-16 h-20 md:w-20 md:h-24 bg-[#DBEAFE] rounded-[24px] flex items-center justify-center text-[#1E3A8A] mb-6 md:mb-8 relative">
-                    <UploadCloud className="w-8 h-8 md:w-10 md:h-10" />
-                    <div className="absolute top-3 right-3 md:top-4 md:right-4 w-5 h-5 md:w-6 md:h-6 bg-white rounded-lg flex items-center justify-center shadow-sm">
-                      <ArrowRight className="w-3 h-3 rotate-[-45deg]" />
-                    </div>
-                  </div>
-                  <h3 className="text-lg md:text-xl font-bold text-[#0F172A] leading-tight mb-2">
-                    Upload Meeting Notes, PDFs, or Slides
-                  </h3>
-                  <p className="text-[10px] md:text-[11px] font-bold text-[#94A3B8] tracking-[0.15em] uppercase">
-                    DRAG & DROP OR BROWSE FILES
-                  </p>
-                  <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" multiple accept=".pdf,image/*,.txt" />
-                </div>
-
-                <div className="space-y-3 md:space-y-4">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[10px] md:text-[11px] font-bold uppercase tracking-[0.15em] text-[#94A3B8]">RAW NOTES INPUT</label>
-                    <ClipboardCopy className="w-4 h-4 md:w-5 md:h-5 text-[#94A3B8]" />
-                  </div>
-                  <div className="bg-white rounded-[24px] border border-[#E2E8F0] shadow-sm p-6 md:p-8 min-h-[250px] md:min-h-[300px]">
+                <div className="flex-1 flex flex-col space-y-4">
+                  <div className="flex-1 flex flex-col bg-white rounded-[32px] border border-[#E2E8F0] shadow-sm p-4 md:p-6 min-h-[400px] relative group overflow-hidden focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
                     <textarea
                       value={inputText}
                       onChange={(e) => setInputText(e.target.value)}
-                      placeholder="Paste transcripts, raw bullets, or agenda items here..."
-                      className="w-full bg-transparent focus:outline-none text-base md:text-lg text-[#0F172A] leading-relaxed placeholder:text-[#CBD5E1] resize-none"
+                      onPaste={(e) => {
+                        const pastedFiles = Array.from(e.clipboardData.files);
+                        if (pastedFiles.length > 0) {
+                          setFiles(prev => [...prev, ...pastedFiles.filter(f => f.size <= MAX_FILE_SIZE)]);
+                        }
+                      }}
+                      placeholder="Paste transcripts, raw bullets, screenshots, or agenda items here..."
+                      className="flex-1 w-full bg-transparent focus:outline-none text-lg md:text-xl text-[#0F172A] leading-relaxed placeholder:text-[#CBD5E1] resize-none"
                     />
+                    
+                    {/* Attachment chips inside the input area */}
+                    {files.length > 0 && (
+                      <div className="flex flex-wrap gap-2 pt-4 border-t border-slate-50">
+                        {files.map((file, idx) => (
+                          <div key={idx} className="flex items-center space-x-2 px-3 py-1.5 bg-slate-50 rounded-full border border-slate-100 animate-in fade-in slide-in-from-bottom-2">
+                            <Paperclip className="w-3 h-3 text-slate-400" />
+                            <span className="text-[10px] font-bold text-slate-600 truncate max-w-[120px]">{file.name}</span>
+                            <button onClick={() => removeFile(idx)} className="text-slate-300 hover:text-rose-500 p-0.5">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Plus Button for Attachments */}
+                    <div className="absolute right-6 bottom-6 flex items-center space-x-2">
+                      <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-12 h-12 bg-slate-50 hover:bg-white border border-slate-100 rounded-full flex items-center justify-center text-[#0F172A] shadow-sm hover:shadow-md transition-all active:scale-90"
+                      >
+                        <Plus className="w-6 h-6" />
+                      </button>
+                      <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" multiple accept=".pdf,image/*,.txt" />
+                    </div>
                   </div>
                 </div>
-
-                {files.length > 0 && (
-                  <div className="mt-6 md:mt-8 space-y-2 md:space-y-3">
-                    {files.map((file, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 md:p-4 bg-white rounded-[16px] md:rounded-[20px] border border-slate-100 shadow-sm">
-                        <div className="flex items-center space-x-3">
-                          <div className="p-1.5 md:p-2 bg-slate-50 rounded-xl text-indigo-500"><FileText className="w-4 h-4 md:w-5 md:h-5" /></div>
-                          <span className="text-xs md:text-sm font-bold text-slate-700 truncate max-w-[150px] md:max-w-[180px]">{file.name}</span>
-                        </div>
-                        <X onClick={() => removeFile(idx)} className="w-4 h-4 md:w-5 md:h-5 text-slate-300 cursor-pointer" />
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </motion.div>
           )}
@@ -420,7 +415,7 @@ export default function App() {
           className={`flex flex-col items-center transition-all ${activeTab === 'input' ? 'text-[#0F172A]' : 'text-[#94A3B8]'}`}
         >
           <div className={`p-2 md:p-2.5 rounded-2xl transition-all ${activeTab === 'input' ? 'bg-slate-100 scale-110' : 'bg-transparent'}`}>
-            <UploadCloud className="w-6 h-6 md:w-7 md:h-7" />
+            <FileText className="w-6 h-6 md:w-7 md:h-7" />
           </div>
           <span className="text-[9px] md:text-[10px] font-bold mt-1.5 md:mt-2 uppercase tracking-[0.15em]">Input</span>
         </button>
